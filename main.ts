@@ -1,49 +1,57 @@
-// ad7 hand-in: copy the video pointer (VIDEO.json) into the grading output.
-// The video itself is the entry — the house reads its views from TikTok.
-// This program only delivers the pointer, nothing else.
-// Rev 2: after copying, verify the delivered file byte-for-byte so a
-// truncated or stale copy can never pass silently as the hand-in.
+// Rev 2: also require a numeric video id after the handle, so a
+// truncated or mistyped link cannot slip through the prefix check.
 import { cpSync, existsSync, mkdirSync, readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
-const REPO_ROOT = fileURLToPath(new URL(".", import.meta.url));
-const VIDEO_POINTER = join(REPO_ROOT, "VIDEO.json");
+const REPO = fileURLToPath(new URL(".", import.meta.url));
+const POINTER = join(REPO, "VIDEO.json");
 
-function targetDir(): string {
-  const fromEnv = process.env.MAKEFUN_OUTPUT_DIR;
-  return fromEnv && fromEnv.length > 0 ? fromEnv : "out";
+function outputFolder(): string {
+  const envDir = process.env.MAKEFUN_OUTPUT_DIR;
+  if (envDir && envDir.trim().length > 0) {
+    return envDir;
+  }
+  return "out";
 }
 
-function checkPointer(): void {
-  if (!existsSync(VIDEO_POINTER)) {
-    throw new Error("VIDEO.json is missing from the repository root");
+function loadPointer(): { url: string } {
+  if (!existsSync(POINTER)) {
+    throw new Error("VIDEO.json not found in the repository root");
   }
-  const parsed = JSON.parse(readFileSync(VIDEO_POINTER, "utf8")) as unknown;
-  if (typeof parsed !== "object" || parsed === null || !("url" in parsed)) {
-    throw new Error("VIDEO.json must be an object with a url field");
+  const data: unknown = JSON.parse(readFileSync(POINTER, "utf8"));
+  if (typeof data !== "object" || data === null) {
+    throw new Error("VIDEO.json must contain a JSON object");
   }
-  const url = (parsed as { url: unknown }).url;
-  if (typeof url !== "string" || !url.startsWith("https://www.tiktok.com/@kzr260/video/")) {
-    throw new Error("VIDEO.json url must be the full TikTok video address");
+  const url = (data as Record<string, unknown>).url;
+  if (typeof url !== "string") {
+    throw new Error("VIDEO.json must have a string url field");
+  }
+  if (!url.startsWith("https://www.tiktok.com/@kzr260/video/")) {
+    throw new Error("VIDEO.json url must point at the @kzr260 TikTok video");
+  }
+  const videoId = url.slice("https://www.tiktok.com/@kzr260/video/".length);
+  if (!/^\d+$/.test(videoId)) {
+    throw new Error("VIDEO.json url must end with a numeric video id");
+  }
+  return { url };
+}
+
+function confirmDelivery(dest: string): void {
+  const delivered = readFileSync(dest);
+  const original = readFileSync(POINTER);
+  if (!delivered.equals(original)) {
+    throw new Error("copied VIDEO.json differs from the repository original");
   }
 }
 
-function verifyCopy(outFile: string): void {
-  const delivered = readFileSync(outFile, "utf8");
-  const source = readFileSync(VIDEO_POINTER, "utf8");
-  if (delivered !== source) {
-    throw new Error("delivered VIDEO.json does not match the repository pointer");
-  }
+function deliverPointer(): void {
+  loadPointer();
+  const folder = outputFolder();
+  mkdirSync(folder, { recursive: true });
+  const dest = join(folder, "VIDEO.json");
+  cpSync(POINTER, dest);
+  confirmDelivery(dest);
 }
 
-function handOverVideoFile(): void {
-  const out = targetDir();
-  mkdirSync(out, { recursive: true });
-  checkPointer();
-  const outFile = join(out, "VIDEO.json");
-  cpSync(VIDEO_POINTER, outFile);
-  verifyCopy(outFile);
-}
-
-handOverVideoFile();
+deliverPointer();
